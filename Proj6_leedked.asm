@@ -17,7 +17,7 @@ INCLUDE Irvine32.inc
 ; ---------------------------------------------------------------------------------
 ; Name: mGetString
 ;
-; Gets a string from the user's keyboard input.
+; Prompts the user to enter a string and then retrieves the string from the user's keyboard input.
 ;
 ; Preconditions:
 ;	EAX: Do not use as argument
@@ -81,8 +81,14 @@ mDisplayString MACRO displayStr
 ENDM
 
 ; ---------- Constants ---------
-MAX_INPUT_SIZE = 13			; Gives room for the sign, 10 digits, and 1 extra byte to see if user's number is too big
-MAX_NUM_LENGTH = 10
+MAX_INPUT_SIZE = 13			; Gives room for the sign, 10 digits, end line, and 1 extra byte to see if user's number has too many digits
+MAX_NUM_LENGTH = 10			; The maximum number of digits
+MAX_NUM_LENGTH_SIGNED = 11	; The maximum number of digits if there is a sign
+
+ASCII_MINUS = 45			; '-'
+ASCII_PLUS = 43				; '+' 
+ASCII_NUM_LO = 48			; '0'
+ASCII_NUM_HI = 57			; '9'
 
 .data
 
@@ -95,12 +101,9 @@ MAX_NUM_LENGTH = 10
 	getStringPrompt		BYTE	"Please enter a signed number: ",0
 
 	; ---------- Input Variables ----------
-	numInput			BYTE	MAX_INPUT_SIZE DUP(?)						; This will hold the user's currently entered number
+	numInput			BYTE	MAX_INPUT_SIZE DUP(?)			; This will hold the user's currently entered number as a string of ASCII
+	numOutput			SDWORD	0								; This will hold the user's number converted to a SDWORD
 	errorMsg			BYTE	"ERROR: You did not enter a signed number or your number was too big.",13,10,0
-
-
-
-; (insert variable definitions here)
 
 .code
 main PROC
@@ -112,10 +115,10 @@ main PROC
 																			; "After you have finished inputting the raw numbers I will display a list of the 
 																			;  integers, their sum, and their average value."
 
-
 	PUSH	OFFSET	getStringPrompt
 	PUSH	OFFSET	errorMsg
 	PUSH	OFFSET	numInput
+	PUSH	OFFSET	numOutput
 	CALL	ReadVal
 
 	Invoke ExitProcess,0	; exit to operating system
@@ -131,9 +134,10 @@ main ENDP
 ; Postconditions: N/A
 ;
 ; Receives:
-;	promptString [EBP + 16]: Reference to the prompStr address, must be passed on the call stack
-;	errorMessage [EBP + 12]: Reference to the error message that will be displayed for bad input, must be passed on the call stack
-;	numInput [EBP + 8]: Reference to a variable that will hold the user's entered value, must be passed on the call stack
+;	promptString [EBP + 20]: Reference to the prompStr address, must be passed on the call stack
+;	errorMessage [EBP + 16]: Reference to the error message that will be displayed for bad input, must be passed on the call stack
+;	numInput [EBP + 12]: Reference to a variable that will hold the user's keyboard input as a string, must be passed on the call stack
+;	numOutput [EBP + 8]: Reference to SDWORD variable that will the user's entered value, must be passed on the call stack
 ;	
 ; Returns:
 ;	numInput: Returns the user's entered value at the given reference.
@@ -142,33 +146,150 @@ ReadVal PROC
 
 	PUSH	EBP					; Preserve EBP
 	MOV		EBP, ESP			; Assign static stack-frame pointer
+	PUSH	EAX					; Preserve EAX
 	PUSH	EBX					; Preserve EBX
+	PUSH	EDI					; Preserve EDI
+	PUSH	EDX					; Preserve EDX
 
 _Input:
-	; Getting the user's input 
-	; numInput [EBP + 8] will be modified to contain it
-	mGetString	[EBP + 16], MAX_INPUT_SIZE, [EBP + 8], EBX
+	; Getting the user's input string, numInput [EBP + 12] will be modified to contain it
+	mGetString	[EBP + 20], MAX_INPUT_SIZE, [EBP + 12], EBX
 
 	; First check if string is too short
 	CMP		EBX, 0
 	JE		_InvalidInput
 
-	MOV		ECX, EBX			; Setting up loop
-	MOV		ESI, [EBP + 8]		; Moving the input string into ESI
+	; Prepping for loop
+	MOV		ECX, EBX			; Setting up loop counter
+	MOV		ESI, [EBP + 12]		; Moving the input string into ESI
+	MOV		EAX, 0				; Clearing EAX, AH will track the sign, AL will hold the byte
+	MOV		EDI, [EBP + 8]		; Moving address of numOutput into EDI
+	MOV		[EDI], EAX			; Zeroing out numOutput
 
-; TODO: UNDER CONSTRUCTION
 _Loop:
-		LODSB
-		 MOV AH, AL
+	LODSB						; Loading the next byte into AL
+
+	CMP		ECX, EBX			; If we are on first iteration of loop
+	JE		_CheckSign			; we are going to check if there is a sign
+	_CheckSignRet:
+
+	JMP		_CheckASCII			; Now going to check if ASCII is a valid number
+	_CheckASCIIRet:
+
+	; We have a valid digit we can start accumulating to convert to SDWORD
+	JMP		_Accumulate
+	_AccumulateRet:
+	
+_LoopEnd:
 	LOOP _Loop
 
+	CMP		AH, 1	
+	JE _Negate
+	_NegateRet:
+
+	POP		EDX					; Restore EDX
+	POP		EDI					; Restore EDI
 	POP		EBX					; Restore EBX
+	POP		EAX					; Restore EAX
 	POP		EBP					; Restore EBP
-	RET		12					; De-reference the passed offsets 12 bytes
+	RET		16					; De-reference the passed offsets 16 bytes
+
+; ---------- ReadVal Code Labels ---------
+_CheckSign:
+; Here we are checking the sign, if it is negative setting sign flag
+
+	CMP		AL, ASCII_PLUS
+	JE		_LeaveCheckSign		; If it is a plus we can skip the ASCII checker
+
+	CMP		AL, ASCII_MINUS
+	JNE		_CheckUnsignedSize	; If it wasn't a minus we need to check size and go on to check the ASCII still	
+
+	; Storing our negative in AH for later
+	MOV		AH,	1
+
+	_LeaveCheckSign:
+	; Byte is a confirmed + or -
+
+	; If it is the only byte that exists, invalid input
+	CMP		EBX, 1
+	JE		_InvalidInput
+
+	; If has more than 11 digits (10 digits + the sign) it is too big, invalid
+	CMP		EBX, MAX_NUM_LENGTH_SIGNED
+	JG		_InvalidInput
+
+	JMP _LoopEnd
+
+_CheckUnsignedSize:
+; If it has more than 10 digits it is too big, invalid
+	CMP		EBX, MAX_NUM_LENGTH
+	JG		_InvalidInput
+	JMP		_CheckSignRet
+
+_CheckASCII:
+; Checking if the current byte is a valid number or not
+	
+	CMP		AL, ASCII_NUM_LO
+	JL		_InvalidInput
+	
+	CMP		AL, ASCII_NUM_HI
+	JG		_InvalidInput
+
+	JMP		_CheckASCIIRet
+
+_Accumulate:
+; Converts byte from ASCII and increments the accumulator (numOutput)
+
+	; Preserving registers for use below
+	PUSH	EAX
+	PUSH	EBX
+	PUSH	ECX
+	PUSH	EDX
+	
+	MOV		AH, 0				; Zeroing out AH
+	MOV		EBX, EAX			; Moving EAX to EBX to clear for multiplication
+
+	SUB		EBX, 48				; Converting the ascii to a decimal	
+
+	MOV		EAX, 10				; Multiplying numOutput accumulator by 10
+	MOV		ECX, [EDI]		
+	MUL		ECX
+
+	JO		_AccumulateExit		; If the OV flag is triggered number was too big
+
+	ADD		EAX, EBX				; Adding the value of the current ascii
+	MOV		[EDI], EAX				; Accumulating into numOutput
+
+	_AccumulateExit:
+
+	; Restoring registers
+	POP		EDX
+	POP		ECX
+	POP		EBX
+	POP		EAX
+
+	JO		_InvalidInput
+
+	JMP		_AccumulateRet
+
+_Negate:
+; Negates the value in numOutput (in EDI)
+
+	PUSH	EAX
+
+	MOV		EAX, [EDI]			; Moving value to EAX
+	NEG		EAX					; Negating
+
+	MOV		[EDI], EAX			; Moving negated number back to numOutput
+
+	POP		EAX
+
+	JMP		_NegateRet
 
 _InvalidInput:
+; Input was invalid display message and start over
 
-	mDisplayString [EBP + 12]
+	mDisplayString [EBP + 16]
 	JMP _Input
 
 ReadVal ENDP
