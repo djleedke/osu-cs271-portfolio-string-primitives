@@ -84,6 +84,7 @@ ENDM
 MAX_INPUT_SIZE = 13			; Gives room for the sign, 10 digits, end line, and 1 extra byte to see if user's number has too many digits
 MAX_NUM_LENGTH = 10			; The maximum number of digits
 MAX_NUM_LENGTH_SIGNED = 11	; The maximum number of digits if there is a sign
+NUM_ENTRIES = 2				; Number of entries that will be requested of the user
 
 ASCII_MINUS = 45			; '-'
 ASCII_PLUS = 43				; '+' 
@@ -99,10 +100,12 @@ ASCII_NUM_HI = 57			; '9'
 								"After you have finished inputting the raw numbers I will display a list of the integers, ",13,10,
 								"their sum, and their average value.",13,10,10,0
 	getStringPrompt		BYTE	"Please enter a signed number: ",0
+	enteredNumbers		BYTE	"You entered the following numbers: ",13,10,0
 
 	; ---------- Input Variables ----------
 	numInput			BYTE	MAX_INPUT_SIZE DUP(?)			; This will hold the user's currently entered number as a string of ASCII
 	numOutput			SDWORD	0								; This will hold the user's number converted to a SDWORD
+	numArray			SDWORD	NUM_ENTRIES DUP(0)				; This will hold each of the user's entries as an SDWORD decimal
 	errorMsg			BYTE	"ERROR: You did not enter a signed number or your number was too big.",13,10,0
 
 .code
@@ -115,11 +118,41 @@ main PROC
 																			; "After you have finished inputting the raw numbers I will display a list of the 
 																			;  integers, their sum, and their average value."
 
+	; Setting up the first loop to read in the user's input
+	MOV		ECX, NUM_ENTRIES
+	MOV		ESI, OFFSET numArray
+
+_Loop1:
+
+	; Reading and validating the user's input
 	PUSH	OFFSET	getStringPrompt
 	PUSH	OFFSET	errorMsg
 	PUSH	OFFSET	numInput
 	PUSH	OFFSET	numOutput
 	CALL	ReadVal
+
+	; Moving the value in numOutput into our array
+	MOV		EAX, numOutput
+	MOV		[ESI], EAX
+	ADD		ESI, TYPE numArray
+
+	Loop	_Loop1
+
+	CALL	CrLF
+	mDisplayString		OFFSET	enteredNumbers								;"You entered the following numbers: "
+
+	; Resetting the loop counter to display the values
+	MOV		ECX, NUM_ENTRIES
+	MOV		ESI, OFFSET numArray
+
+_Loop2:
+	
+	PUSH	OFFSET numInput
+	PUSH	[ESI]
+	CALL	WriteVal
+
+	ADD		ESI, TYPE numArray
+	Loop	_Loop2
 
 	Invoke ExitProcess,0	; exit to operating system
 main ENDP
@@ -127,14 +160,17 @@ main ENDP
 ; ---------------------------------------------------------------------------------
 ; Name: ReadVal
 ;
-; TODO: NEED DESCRIPTION
+; Reads in the user's input in an ASCII string to the provided input array and outputs
+; that string into the provided output reference as an SDWORD.  Handles signed integers
+; between -2147483647 and 2147483647.  If the input is invalid or out of those bounds
+; will reprompt the user with an error message.
 ;
 ; Preconditions: N/A
 ;
 ; Postconditions: N/A
 ;
 ; Receives:
-;	promptString [EBP + 20]: Reference to the prompStr address, must be passed on the call stack
+;	promptString [EBP + 20]: Reference to the prompt string address, must be passed on the call stack
 ;	errorMessage [EBP + 16]: Reference to the error message that will be displayed for bad input, must be passed on the call stack
 ;	numInput [EBP + 12]: Reference to a variable that will hold the user's keyboard input as a string, must be passed on the call stack
 ;	numOutput [EBP + 8]: Reference to SDWORD variable that will the user's entered value, must be passed on the call stack
@@ -146,10 +182,14 @@ ReadVal PROC
 
 	PUSH	EBP					; Preserve EBP
 	MOV		EBP, ESP			; Assign static stack-frame pointer
-	PUSH	EAX					; Preserve EAX
-	PUSH	EBX					; Preserve EBX
-	PUSH	EDI					; Preserve EDI
-	PUSH	EDX					; Preserve EDX
+
+	; Preserve registers
+	PUSH	EAX					
+	PUSH	EBX
+	PUSH	ECX
+	PUSH	EDI					
+	PUSH	EDX
+	PUSH	ESI
 
 _Input:
 	; Getting the user's input string, numInput [EBP + 12] will be modified to contain it
@@ -187,11 +227,14 @@ _LoopEnd:
 	JE _Negate
 	_NegateRet:
 
-	POP		EDX					; Restore EDX
-	POP		EDI					; Restore EDI
-	POP		EBX					; Restore EBX
-	POP		EAX					; Restore EAX
-	POP		EBP					; Restore EBP
+	; Restore registers
+	POP		ESI
+	POP		EDX					
+	POP		EDI		
+	POP		ECX
+	POP		EBX					
+	POP		EAX					
+	POP		EBP					
 	RET		16					; De-reference the passed offsets 16 bytes
 
 ; ---------- ReadVal Code Labels ---------
@@ -257,8 +300,8 @@ _Accumulate:
 
 	JO		_AccumulateExit		; If the OV flag is triggered number was too big
 
-	ADD		EAX, EBX				; Adding the value of the current ascii
-	MOV		[EDI], EAX				; Accumulating into numOutput
+	ADD		EAX, EBX			; Adding the value of the current ascii
+	MOV		[EDI], EAX			; Accumulating into numOutput
 
 	_AccumulateExit:
 
@@ -294,10 +337,75 @@ _InvalidInput:
 
 ReadVal ENDP
 
-
+; ---------------------------------------------------------------------------------
+; Name: WriteVal
+;
+; 
+;
+; Preconditions: N/A
+;
+; Postconditions: N/A
+;
+; Receives:
+;	numInput [EBP + 12]: Array to hold each ASCII value
+;	number [EBP + 8]: SDWORD value that will be displayed, must be passed on the call stack
+;	
+; Returns: N/A
+;	
+; ---------------------------------------------------------------------------------
 WriteVal PROC
 
+	PUSH	EBP					; Preserve EBP
+	MOV		EBP, ESP			; Assign static stack-frame pointer
+	; Preserve registers
+	PUSH	EAX
+	PUSH	EBX
+	PUSH	ECX
+	PUSH	EDI
+	PUSH	EDX
 
+	; Clearing out whatever was in the ascii holder before
+	MOV		EDI, [EBP + 12]
+	MOV		ECX, MAX_INPUT_SIZE
+	MOV		AL, 0
+	REP		STOSB
+
+	; Pointing back to the start of the ascii holder
+	MOV		EDI, [EBP + 12]
+	MOV		EAX, [EBP + 8]		; Moving our number to EAX and checking if it is negative
+	CMP		EAX, 0
+	JL		_Negative
+	_NegativeRet:
+
+	; TODO: Need to figure out how to convert SDWORDs back to ASCII
+	; ---------- UNDER CONSTRUCTION ----------
+	MOV		ECX, 2		;temp
+	MOV		EAX, [EBP + 8]		; Dividend
+_Loop:
+	
+	MOV		EDX, 0				; Clear high dividend
+	MOV		EBX, 10				; Divisor
+	DIV		EBX
+	Loop _Loop
+
+	; Restore registers
+	POP		EDX
+	POP		EDI
+	POP		ECX
+	POP		EBX
+	POP		EAX
+	POP		EBP	
+	RET 8
+
+_Negative:
+; Number is negative, add a sign to our ascii string and make it positive
+	
+	MOV		AL, ASCII_MINUS
+	STOSB
+
+	NEG		EAX
+
+	JMP		_NegativeRet
 
 WriteVal ENDP
 
