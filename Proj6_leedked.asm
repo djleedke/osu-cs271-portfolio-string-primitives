@@ -84,7 +84,7 @@ ENDM
 MAX_INPUT_SIZE = 13			; Gives room for the sign, 10 digits, end line, and 1 extra byte to see if user's number has too many digits
 MAX_NUM_LENGTH = 10			; The maximum number of digits
 MAX_NUM_LENGTH_SIGNED = 11	; The maximum number of digits if there is a sign
-NUM_ENTRIES = 2				; Number of entries that will be requested of the user
+NUM_ENTRIES = 10			; Number of entries that will be requested of the user
 
 ASCII_MINUS = 45			; '-'
 ASCII_PLUS = 43				; '+' 
@@ -101,6 +101,8 @@ ASCII_NUM_HI = 57			; '9'
 								"their sum, and their average value.",13,10,10,0
 	getStringPrompt		BYTE	"Please enter a signed number: ",0
 	enteredNumbers		BYTE	"You entered the following numbers: ",13,10,0
+	spaceString			BYTE	" ",0
+	commaString			BYTE	",",0
 
 	; ---------- Input Variables ----------
 	numInput			BYTE	MAX_INPUT_SIZE DUP(?)			; This will hold the user's currently entered number as a string of ASCII
@@ -147,14 +149,22 @@ _Loop1:
 
 _Loop2:
 	
+	; Displaying each number as an ascii string using WriteVal
 	PUSH	OFFSET numInput
-	PUSH	[ESI]
+	PUSH	[ESI]															
 	CALL	WriteVal
+
+	CMP		ECX, 1
+	JE		_NoComma
+	mDisplayString		OFFSET commaString
+
+	_NoComma:
+	mDisplayString		OFFSET spaceString
 
 	ADD		ESI, TYPE numArray
 	Loop	_Loop2
 
-	Invoke ExitProcess,0	; exit to operating system
+	Invoke ExitProcess,0													; exit to operating system
 main ENDP
 
 ; ---------------------------------------------------------------------------------
@@ -224,7 +234,7 @@ _LoopEnd:
 	LOOP _Loop
 
 	CMP		AH, 1	
-	JE _Negate
+	JE		_Negate
 	_NegateRet:
 
 	; Restore registers
@@ -333,21 +343,22 @@ _InvalidInput:
 ; Input was invalid display message and start over
 
 	mDisplayString [EBP + 16]
-	JMP _Input
+	JMP		 _Input
 
 ReadVal ENDP
 
 ; ---------------------------------------------------------------------------------
 ; Name: WriteVal
 ;
-; 
+; Takes in a SDWORD value and converts the decimal back into an ASCII string.  Once
+; converted displays the entire value as an ASCII string to the command prompt.
 ;
 ; Preconditions: N/A
 ;
 ; Postconditions: N/A
 ;
 ; Receives:
-;	numInput [EBP + 12]: Array to hold each ASCII value
+;	numOutput [EBP + 12]: Array to hold each ASCII value and display the string, must be passed on the call stack
 ;	number [EBP + 8]: SDWORD value that will be displayed, must be passed on the call stack
 ;	
 ; Returns: N/A
@@ -355,8 +366,9 @@ ReadVal ENDP
 ; ---------------------------------------------------------------------------------
 WriteVal PROC
 
-	PUSH	EBP					; Preserve EBP
-	MOV		EBP, ESP			; Assign static stack-frame pointer
+	PUSH	EBP						; Preserve EBP
+	MOV		EBP, ESP				; Assign static stack-frame pointer
+
 	; Preserve registers
 	PUSH	EAX
 	PUSH	EBX
@@ -364,29 +376,49 @@ WriteVal PROC
 	PUSH	EDI
 	PUSH	EDX
 
-	; Clearing out whatever was in the ascii holder before
-	MOV		EDI, [EBP + 12]
-	MOV		ECX, MAX_INPUT_SIZE
-	MOV		AL, 0
-	REP		STOSB
+	MOV		EDI, [EBP + 12]			; This is going to be the output string
+	MOV		EAX, [EBP + 8]			; The number value
 
-	; Pointing back to the start of the ascii holder
-	MOV		EDI, [EBP + 12]
-	MOV		EAX, [EBP + 8]		; Moving our number to EAX and checking if it is negative
-	CMP		EAX, 0
-	JL		_Negative
-	_NegativeRet:
+	CMP		EAX, 0					; If negative, converting to a positive number for easier handling
+	JL		_Negate					
+	_NegateRet:
 
-	; TODO: Need to figure out how to convert SDWORDs back to ASCII
-	; ---------- UNDER CONSTRUCTION ----------
-	MOV		ECX, 2		;temp
-	MOV		EAX, [EBP + 8]		; Dividend
+	MOV		ECX, MAX_INPUT_SIZE		
+	PUSH	0						; Pushing null to signify end of the number
+
 _Loop:
-	
-	MOV		EDX, 0				; Clear high dividend
-	MOV		EBX, 10				; Divisor
+
+	; Calculating each digit by dividing remaining quotient by 10, pushing remainder to the stack
+
+	MOV		EDX, 0					; Clear high dividend
+	MOV		EBX, 10					; Divide by 10
 	DIV		EBX
+
+	ADD		EDX, 48
+	PUSH	EDX						; Pushing the remainder (the next digit) on to the stack
+
+	CMP		EAX, 0					; Quotient is 0 we are done
+	JE		_Continue
+
 	Loop _Loop
+
+_Continue:
+
+	MOV		EAX, [EBP + 8]			; Resetting EAX w/ original value
+	CMP		EAX, 0
+	JL		_PushMinus				; Pushing minus sign if negative
+
+_Pop:
+
+	; Popping the stack until we hit a null bit and storing in EDI (the output string)
+
+	POP		EAX
+	STOSB	
+
+	CMP		AL, 0					
+	JNE		_Pop
+
+	mDisplayString	[EBP + 12]		; Finally, display the string
 
 	; Restore registers
 	POP		EDX
@@ -397,15 +429,17 @@ _Loop:
 	POP		EBP	
 	RET 8
 
-_Negative:
-; Number is negative, add a sign to our ascii string and make it positive
-	
-	MOV		AL, ASCII_MINUS
-	STOSB
+; ---------- WriteVal Code Labels ---------
 
+_Negate:
+; Converting to a positive number for easier handling
 	NEG		EAX
+	JMP		_NegateRet
 
-	JMP		_NegativeRet
+_PushMinus:
+; Pushing a minus ASCII to the stack
+	PUSH	ASCII_MINUS
+	JMP		_Pop
 
 WriteVal ENDP
 
