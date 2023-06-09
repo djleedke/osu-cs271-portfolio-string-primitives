@@ -1,12 +1,12 @@
 TITLE Project 6    (Proj6_leedked.asm)
 
 ; Author: Doug Leedke
-; Last Modified: 6/3/2023
+; Last Modified: 6/9/2023
 ; OSU email address: leedked@oregonstate.edu
 ; Course number/section:   CS271 Section 403
 ; Project Number: 6               Due Date: 6/11/2023
 ; Description: This program will implement and test two macros & two procedures for string processing using string
-; primitive instructions.  One will display a prompt and get the a string (entered by the user) and one will display the string.
+; primitive instructions.  One will display a prompt and get the string (entered by the user) and one will display the string.
 ; The program will then use the 2 procedures to read in 10 valid integers from the user, store them in an array, and display
 ; the integers, their sum, and their truncated average to the command line.
 
@@ -86,6 +86,9 @@ MAX_NUM_LENGTH = 10			; The maximum number of digits
 MAX_NUM_LENGTH_SIGNED = 11	; The maximum number of digits if there is a sign
 NUM_ENTRIES = 10			; Number of entries that will be requested of the user
 
+MAX_SIZE_SDWORD = 2147483647		; Max size for a positive number
+MAX_SIZE_SDWORD_NEG = 2147483648	; Max size for a negative number
+
 ASCII_MINUS = 45			; '-'
 ASCII_PLUS = 43				; '+' 
 ASCII_NUM_LO = 48			; '0'
@@ -95,28 +98,36 @@ ASCII_NUM_HI = 57			; '9'
 
 	; --------- Title & Prompt Variables ---------
 	programTitle		BYTE	"Project 6 - Designing Low-level I/O Procedures - By Doug Leedke",13,10,10,0
-	instructionString1	BYTE	"Please provide 10 signed decimal integers.",13,10,0
-	instructionString2	BYTE	"Each number needs to be small enough to fit inside a 32 bit register.",13,10,
+	instructionStr1		BYTE	"Please provide 10 signed decimal integers.",13,10,0
+	instructionStr2		BYTE	"Each number needs to be small enough to fit inside a 32 bit register.",13,10,
 								"After you have finished inputting the raw numbers I will display a list of the integers, ",13,10,
 								"their sum, and their average value.",13,10,10,0
 	getStringPrompt		BYTE	"Please enter a signed number: ",0
-	enteredNumbers		BYTE	"You entered the following numbers: ",13,10,0
-	spaceString			BYTE	" ",0
-	commaString			BYTE	",",0
+	errorMsg			BYTE	"ERROR: You did not enter a signed number or your number was too big.",13,10,0
+	errorMsgPrompt		BYTE	"Please try again: ",0
+	enteredStr			BYTE	"You entered the following numbers: ",13,10,0
+	sumStr				BYTE	"The sum of these numbers is: ",0
+	avgStr				BYTE	"The truncated average is: ",0
+	goodbyeStr			BYTE	10,"Thanks for playing!",13,10,0
+	spaceStr			BYTE	" ",0
+	commaStr			BYTE	",",0
 
 	; ---------- Input Variables ----------
 	numInput			BYTE	MAX_INPUT_SIZE DUP(?)			; This will hold the user's currently entered number as a string of ASCII
 	numOutput			SDWORD	0								; This will hold the user's number converted to a SDWORD
 	numArray			SDWORD	NUM_ENTRIES DUP(0)				; This will hold each of the user's entries as an SDWORD decimal
-	errorMsg			BYTE	"ERROR: You did not enter a signed number or your number was too big.",13,10,0
+
+	; --------- Result Variables ----------
+	numsSum				SDWORD	0
+	numsAvg				SDWORD	0
 
 .code
 main PROC
 
 	; Display Program Title	& Instructions
 	mDisplayString		OFFSET programTitle									; "Project 6 - Designing Low-level I/O Procedures - By Doug Leedke"
-	mDisplayString		OFFSET instructionString1							; "Please provide 10 signed decimal integers."
-	mDisplayString		OFFSET instructionString2							; "Each number needs to be small enough to fit inside a 32 bit register."
+	mDisplayString		OFFSET instructionStr1								; "Please provide 10 signed decimal integers."
+	mDisplayString		OFFSET instructionStr2								; "Each number needs to be small enough to fit inside a 32 bit register."
 																			; "After you have finished inputting the raw numbers I will display a list of the 
 																			;  integers, their sum, and their average value."
 
@@ -128,6 +139,7 @@ _Loop1:
 
 	; Reading and validating the user's input
 	PUSH	OFFSET	getStringPrompt
+	PUSH	OFFSET	errorMsgPrompt
 	PUSH	OFFSET	errorMsg
 	PUSH	OFFSET	numInput
 	PUSH	OFFSET	numOutput
@@ -141,7 +153,7 @@ _Loop1:
 	Loop	_Loop1
 
 	CALL	CrLF
-	mDisplayString		OFFSET	enteredNumbers								;"You entered the following numbers: "
+	mDisplayString		OFFSET	enteredStr									;"You entered the following numbers: "
 
 	; Resetting the loop counter to display the values
 	MOV		ECX, NUM_ENTRIES
@@ -154,17 +166,52 @@ _Loop2:
 	PUSH	[ESI]															
 	CALL	WriteVal
 
+	; Determining if we need a comma or not
 	CMP		ECX, 1
-	JE		_NoComma
-	mDisplayString		OFFSET commaString
+	JE		_NoComma														; No Comma on the last iteration
+	mDisplayString		OFFSET commaStr
 
 	_NoComma:
-	mDisplayString		OFFSET spaceString
+	mDisplayString		OFFSET spaceStr
 
+	; Increasing the cumulative sum by the value of the current number
+	MOV		EAX, [ESI]
+	ADD		numsSum, EAX 
 	ADD		ESI, TYPE numArray
 	Loop	_Loop2
 
-	Invoke ExitProcess,0													; exit to operating system
+	CALL	CrLF
+
+	; Displaying the cumulative sum
+	mDisplayString		OFFSET sumStr										;"The sum of these numbers is: "
+	
+	PUSH	OFFSET numInput
+	PUSH	numsSum
+	CALL	WriteVal
+
+	CALL	CrLF
+
+	; Displaying the truncated average
+	mDisplayString		OFFSET avgStr										;"The truncated average is: "
+	
+	; Dividing total sum by number of entries to get average
+	; must do signed division to account for negatives
+	MOV		EAX, numsSum
+	MOV		EDX, 0	
+	MOV		EBX, NUM_ENTRIES
+	CDQ																		
+	IDIV	EBX															; Average now in EAX
+	MOV		numsAvg, EAX
+
+	PUSH	OFFSET numInput
+	PUSH	numsAvg
+	CALL	WriteVal
+
+	; Goodbye message
+	CALL CrLF
+	mDisplayString		OFFSET goodbyeStr									;"Thanks for playing!"
+
+	Invoke ExitProcess,0													; Exit
 main ENDP
 
 ; ---------------------------------------------------------------------------------
@@ -172,21 +219,22 @@ main ENDP
 ;
 ; Reads in the user's input in an ASCII string to the provided input array and outputs
 ; that string into the provided output reference as an SDWORD.  Handles signed integers
-; between -2147483647 and 2147483647.  If the input is invalid or out of those bounds
-; will reprompt the user with an error message.
+; between -2147483648 and 2147483647.  If the input is invalid or out of those bounds
+; will reprompt the user with the provided error message.
 ;
 ; Preconditions: N/A
 ;
 ; Postconditions: N/A
 ;
 ; Receives:
-;	promptString [EBP + 20]: Reference to the prompt string address, must be passed on the call stack
+;	promptString [EBP + 24]: Reference to the prompt string address, must be passed on the call stack
+;	errorMessagePrompt [EBP + 20]:	Reference to the error message prompt used after incorrect input, must be passed to the call stack
 ;	errorMessage [EBP + 16]: Reference to the error message that will be displayed for bad input, must be passed on the call stack
 ;	numInput [EBP + 12]: Reference to a variable that will hold the user's keyboard input as a string, must be passed on the call stack
-;	numOutput [EBP + 8]: Reference to SDWORD variable that will the user's entered value, must be passed on the call stack
+;	numOutput [EBP + 8]: Reference to SDWORD variable that will hold the user's entered value, must be passed on the call stack
 ;	
 ; Returns:
-;	numInput: Returns the user's entered value at the given reference.
+;	numOutput: Returns the user's entered value at the given reference.
 ; ---------------------------------------------------------------------------------
 ReadVal PROC
 
@@ -201,10 +249,11 @@ ReadVal PROC
 	PUSH	EDX
 	PUSH	ESI
 
-_Input:
-	; Getting the user's input string, numInput [EBP + 12] will be modified to contain it
-	mGetString	[EBP + 20], MAX_INPUT_SIZE, [EBP + 12], EBX
 
+	; Getting the user's input string, numInput [EBP + 12] will be modified to contain it
+	mGetString	[EBP + 24], MAX_INPUT_SIZE, [EBP + 12], EBX
+
+_Input:
 	; First check if string is too short
 	CMP		EBX, 0
 	JE		_InvalidInput
@@ -230,7 +279,7 @@ _Loop:
 	JMP		_Accumulate
 	_AccumulateRet:
 	
-_LoopEnd:
+	_LoopEnd:
 	LOOP _Loop
 
 	CMP		AH, 1	
@@ -245,7 +294,7 @@ _LoopEnd:
 	POP		EBX					
 	POP		EAX					
 	POP		EBP					
-	RET		16					; De-reference the passed offsets 16 bytes
+	RET		20					; De-reference the passed offsets 20 bytes
 
 ; ---------- ReadVal Code Labels ---------
 _CheckSign:
@@ -280,7 +329,7 @@ _CheckUnsignedSize:
 	JMP		_CheckSignRet
 
 _CheckASCII:
-; Checking if the current byte is a valid number or not
+; Checking if the current byte is a valid ascii number or not
 	
 	CMP		AL, ASCII_NUM_LO
 	JL		_InvalidInput
@@ -299,6 +348,10 @@ _Accumulate:
 	PUSH	ECX
 	PUSH	EDX
 	
+	MOV		EBX, 0				
+	MOV		BH,	AH
+	PUSH	EBX					; Moving our negative tracker to EBX and push to stack for later use
+
 	MOV		AH, 0				; Zeroing out AH
 	MOV		EBX, EAX			; Moving EAX to EBX to clear for multiplication
 
@@ -308,10 +361,26 @@ _Accumulate:
 	MOV		ECX, [EDI]		
 	MUL		ECX
 
+	ADD		EAX, EBX			; Adding the value of the current ascii
+
+	POP		EBX					; Retrieving our negative tracker (in BH)
+	CMP		BH, 1
+	JNE		_AccumulatePos		; If number is negative, special handling below
+
+	_AccumulateNeg:						; Special case to check for negative -2147483648 entry
+	PUSH	EAX							
+	NEG		EAX							; Negating EAX
+	CMP		EAX, MAX_SIZE_SDWORD_NEG	; If we negate and the value is 2147483648 we need to allow entry
+	POP		EAX							
+	JE		_CheckOverflow				; Jump if equal, anything other than 2147483648 we treat normally
+
+	_AccumulatePos:
+	CMP		EAX, MAX_SIZE_SDWORD
+
+	_CheckOverflow:
 	JO		_AccumulateExit		; If the OV flag is triggered number was too big
 
-	ADD		EAX, EBX			; Adding the value of the current ascii
-	MOV		[EDI], EAX			; Accumulating into numOutput
+	MOV		[EDI], EAX			; Otherwise Accumulating into numOutput
 
 	_AccumulateExit:
 
@@ -342,7 +411,8 @@ _Negate:
 _InvalidInput:
 ; Input was invalid display message and start over
 
-	mDisplayString [EBP + 16]
+	mDisplayString [EBP + 16]									; Error message
+	mGetString	[EBP + 20], MAX_INPUT_SIZE, [EBP + 12], EBX		; Reprompt for input
 	JMP		 _Input
 
 ReadVal ENDP
@@ -351,15 +421,19 @@ ReadVal ENDP
 ; Name: WriteVal
 ;
 ; Takes in a SDWORD value and converts the decimal back into an ASCII string.  Once
-; converted displays the entire value as an ASCII string to the command prompt.
+; converted displays the entire value as an ASCII string to the command prompt. This
+; process is accomplished by deconstructing the number and pushing each digit onto
+; the call stack, then popping each one off into the provided output array to be 
+; displayed.
 ;
 ; Preconditions: N/A
 ;
-; Postconditions: N/A
+; Postconditions: 
+;	numOutput [EBP + 12]: Will be modified during execution
 ;
 ; Receives:
 ;	numOutput [EBP + 12]: Array to hold each ASCII value and display the string, must be passed on the call stack
-;	number [EBP + 8]: SDWORD value that will be displayed, must be passed on the call stack
+;	number [EBP + 8]: SDWORD value that will be displayed as ASCII, must be passed on the call stack
 ;	
 ; Returns: N/A
 ;	
