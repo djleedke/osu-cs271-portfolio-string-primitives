@@ -1,7 +1,7 @@
 TITLE Project 6    (Proj6_leedked.asm)
 
 ; Author: Doug Leedke
-; Last Modified: 6/9/2023
+; Last Modified: 6/11/2023
 ; OSU email address: leedked@oregonstate.edu
 ; Course number/section:   CS271 Section 403
 ; Project Number: 6               Due Date: 6/11/2023
@@ -359,7 +359,8 @@ _Accumulate:
 
 	MOV		EAX, 10				; Multiplying numOutput accumulator by 10
 	MOV		ECX, [EDI]		
-	MUL		ECX
+	IMUL	ECX
+	JO		_RestoreEBX			; # too big, EBX (negative tracker) needs to be restored since we are leaving before using it
 
 	ADD		EAX, EBX			; Adding the value of the current ascii
 
@@ -393,6 +394,11 @@ _Accumulate:
 	JO		_InvalidInput
 
 	JMP		_AccumulateRet
+
+_RestoreEBX:
+
+	POP	EBX
+	JMP _AccumulateExit
 
 _Negate:
 ; Negates the value in numOutput (in EDI)
